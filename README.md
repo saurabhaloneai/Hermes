@@ -6,6 +6,8 @@
 
 ![img](assets/hermes.png)
 
+## my todo list 
+
 - [ ] I will be starting with simple llm forward pass with kv cache.
 - [ ] Continous Batching
 - [ ] Good and fast sampling 
