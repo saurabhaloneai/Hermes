@@ -12,3 +12,5 @@
 - [ ] Continous Batching
 - [ ] Good and fast sampling 
 
+> [!NOTE]
+> There is a version of this engine i tried to build in jax but tools around are not that good and also tpu poor myself. 

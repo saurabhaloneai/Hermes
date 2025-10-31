@@ -3,6 +3,12 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# model weights
+model_cache/
+
+# references
+reference/
+
 # C extensions
 *.so
 
