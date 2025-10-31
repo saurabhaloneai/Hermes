@@ -2,17 +2,11 @@
 
 > [!IMPORTANT]
 > 
-> I am building this project to learn about the internals of llm inference
->
-> This is a work in progress.
+> I do not know much about llm inference, so this project is a learning experience for me. I will try to keep stuff simple and under 2000 lines of code.
 
 ![img](assets/hermes.png)
 
+- [ ] I will be starting with simple llm forward pass with kv cache.
+- [ ] Continous Batching
+- [ ] Good and fast sampling 
 
-I will be starting with simple llm forward pass with kv cache.
-
-## Stuff to add 
-
-- [ ] Handle the kv cache memory uses
-- [ ] Specualative decoding
-....
