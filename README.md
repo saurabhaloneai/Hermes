@@ -1,16 +1,16 @@
-# Hermes
+# hermes 
 
 > [!IMPORTANT]
-> 
-> I do not know much about llm inference, so this project is a learning experience for me. I will try to keep stuff simple and under 2000 lines of code.
+> This project is made for my personal use like doing post training research and inference.
+> This is a mono repo which will consist of post-training and inference library for Qwen-3 model.
 
-![img](assets/hermes.png)
-
-## my todo list 
-
-- [ ] I will be starting with simple llm forward pass with kv cache.
-- [ ] Continous Batching
-- [ ] Good and fast sampling 
-
-> [!NOTE]
-> There is a version of this engine i tried to build in jax but tools around are not that good and also tpu poor myself. 
+## TODO 
+- [ ] Add qwen-3-VL 
+- [ ] Add Text only model Qwen-3 
+- [ ] Add continous batching 
+- [ ] Add support kv caching 
+- [ ] Add support for paged-attention 
+- [ ] Add support for quantization
+- [ ] Add support for flash attention
+- [ ] Add LoRa and sft 
+- [ ] Add RL 
