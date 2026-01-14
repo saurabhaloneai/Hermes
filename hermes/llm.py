@@ -34,6 +34,7 @@ class LLM:
         model_id: str = "Qwen/Qwen3-VL-2B-Instruct",
         device_map: str = "auto",
         cache_dir: Optional[str] = None,
+        max_image_pixels: Optional[int] = 768 * 768,
     ):
         weights_path = snapshot_download(repo_id=model_id, cache_dir=cache_dir)
         model_path = Path(weights_path)
@@ -86,6 +87,8 @@ class LLM:
         model.eval()
 
         processor = Processor.from_pretrained(model_id)
+        if max_image_pixels is not None:
+            processor.max_pixels = max_image_pixels
 
         return cls(model=model, processor=processor)
 
