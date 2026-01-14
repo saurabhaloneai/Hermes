@@ -52,7 +52,8 @@ class SelfAttention(nn.Module):
         self.q_norm = RMSNorm(self.d_head, eps=config.rms_norm_eps)
         self.k_norm = RMSNorm(self.d_head, eps=config.rms_norm_eps)
 
-    def forward(self, x, cos, sin):
+    def forward(self, x, cos, sin, past_kv=None):
+        
         B, T, C = x.size()
 
         q = self.q_proj(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)
@@ -64,15 +65,32 @@ class SelfAttention(nn.Module):
 
         q, k = self._apply_rotary_pos_emb(q, k, cos, sin)
 
+        # Concatenate with past key-values if provided
+        if past_kv is not None:
+            past_k, past_v = past_kv
+            k = torch.cat([past_k, k], dim=2)
+            v = torch.cat([past_v, v], dim=2)
+
+        # Store current k, v for caching (before GQA expansion)
+        present_kv = (k, v)
+
+        # GQA: expand k, v to match number of query heads
         if self.n_kv_heads < self.n_heads:
             num_repeat = self.n_heads // self.n_kv_heads
-            k = k.repeat_interleave(num_repeat, dim=1)
-            v = v.repeat_interleave(num_repeat, dim=1)
+            k_expanded = k.repeat_interleave(num_repeat, dim=1)
+            v_expanded = v.repeat_interleave(num_repeat, dim=1)
+        else:
+            k_expanded = k
+            v_expanded = v
 
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        # During decode (T=1), no causal mask needed since single query sees all past
+        # During prefill (T>1), use causal mask
+        is_causal = past_kv is None and T > 1
+        y = F.scaled_dot_product_attention(q, k_expanded, v_expanded, is_causal=is_causal)
+        
         y = y.transpose(1, 2).contiguous().view(B, T, self.n_heads * self.d_head)
         y = self.o_proj(y)
-        return y
+        return y, present_kv
 
     @staticmethod
     def _apply_rotary_pos_emb(q, k, cos, sin):

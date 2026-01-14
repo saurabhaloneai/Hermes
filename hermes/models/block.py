@@ -12,7 +12,12 @@ class Block(nn.Module):
         self.post_attention_layernorm = RMSNorm(n_embed=n_embed, eps=eps)
         self.mlp = MoEMLP(config) if config.n_experts else DenseMLP(config)
 
-    def forward(self, x, cos, sin):
-        x = x + self.self_attn(self.input_layernorm(x), cos, sin)
+    def forward(self, x, cos, sin, layer_past_kv=None):
+        
+        attn_out, present_kv = self.self_attn(
+            self.input_layernorm(x), cos, sin, past_kv=layer_past_kv
+        )
+        x = x + attn_out
         x = x + self.mlp(self.post_attention_layernorm(x))
-        return x
+        return x, present_kv
+

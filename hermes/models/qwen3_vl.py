@@ -24,13 +24,21 @@ class Model(nn.Module):
         vision_residuals=None,
         vision_mask=None,
         position_ids=None,
+        past_key_values=None,
     ):
+        
         if vision_embed is not None and vision_mask is not None:
             input_embed[vision_mask] = vision_embed
 
         cos, sin = self.rotary_emb(input_embed, position_ids)
+        
+        present_key_values = []
         for layer_idx, layer in enumerate(self.layers):
-            input_embed = layer(input_embed, cos, sin)
+            layer_past_kv = past_key_values[layer_idx] if past_key_values else None
+            
+            input_embed, present_kv = layer(input_embed, cos, sin, layer_past_kv=layer_past_kv)
+            present_key_values.append(present_kv)
+            
             if vision_residuals and vision_mask is not None:
                 vision_residual = vision_residuals.get(layer_idx)
                 if vision_residual is not None:
@@ -39,7 +47,7 @@ class Model(nn.Module):
                     )
 
         input_embed = self.norm(input_embed)
-        return input_embed
+        return input_embed, present_key_values
 
 
 class Qwen3VL(nn.Module):
@@ -64,9 +72,11 @@ class Qwen3VL(nn.Module):
         input_ids: torch.Tensor,
         pixels: Optional[torch.Tensor] = None,
         d_image: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
+        past_key_values: Optional[list] = None,
+    ) -> Tuple[torch.Tensor, list]:
+        
         input_embeds = self.model.language_model.embed_tokens(input_ids)
-        position_ids = self._get_position_ids(input_ids=input_ids, d_image=d_image)
+        position_ids = self._get_position_ids(input_ids=input_ids, d_image=d_image, past_key_values=past_key_values)
 
         if pixels is not None:
             pixels = pixels.to(input_embeds.dtype)
@@ -75,16 +85,19 @@ class Qwen3VL(nn.Module):
             )
             image_pad_token = getattr(self.config, "image_token_id", 151655)
             vision_mask = input_ids == image_pad_token
-            output = self.model.language_model(
+            output, present_key_values = self.model.language_model(
                 input_embed=input_embeds,
                 vision_embed=vision_embed,
                 vision_residuals=vision_residuals,
                 vision_mask=vision_mask,
                 position_ids=position_ids,
+                past_key_values=past_key_values,
             )
         else:
-            output = self.model.language_model(
-                input_embed=input_embeds, position_ids=position_ids
+            output, present_key_values = self.model.language_model(
+                input_embed=input_embeds, 
+                position_ids=position_ids,
+                past_key_values=past_key_values,
             )
 
         logits = (
@@ -92,19 +105,30 @@ class Qwen3VL(nn.Module):
             if self.lm_head is None
             else self.lm_head(output)
         )
-        return logits
+        return logits, present_key_values
 
     def _get_position_ids(
-        self, input_ids: torch.Tensor, d_image: Optional[torch.Tensor] = None
+        self, 
+        input_ids: torch.Tensor, 
+        d_image: Optional[torch.Tensor] = None,
+        past_key_values: Optional[list] = None,
     ) -> torch.Tensor:
+        
         B, T = input_ids.shape
         image_pad_token = getattr(self.config, "image_token_id", 151655)
+        
+        # calculate offset from cached sequence
+        past_len = 0
+        if past_key_values is not None and len(past_key_values) > 0:
+            # get sequence length from first layer's cached keys
+            past_len = past_key_values[0][0].shape[2]
 
-        if d_image is None:
-            position_ids = torch.arange(T, dtype=torch.long, device=input_ids.device)
+        if d_image is None or past_key_values is not None:
+            position_ids = torch.arange(past_len, past_len + T, dtype=torch.long, device=input_ids.device)
             position_ids = position_ids.unsqueeze(0).expand(3, B, -1)
             return position_ids
 
+        # Prefill with images: compute M-RoPE positions
         position_ids = torch.zeros(3, B, T, dtype=torch.long, device=input_ids.device)
         for batch_idx in range(B):
             seq = input_ids[batch_idx]
@@ -163,17 +187,34 @@ class Qwen3VL(nn.Module):
         max_new_tokens: int,
         stop_tokens: Optional[list],
     ):
+       
         if stop_tokens is None:
             stop_tokens = [151645, 151644, 151643]
 
         self.eval()
         generated_ids = input_ids
+        past_key_values = None
 
         with torch.no_grad():
-            for _ in range(max_new_tokens):
-                logits = self.forward(
-                    input_ids=generated_ids, pixels=pixels, d_image=d_image
+            for step in range(max_new_tokens):
+                if step == 0:
+                    # Prefill: process full input with vision
+                    current_ids = generated_ids
+                    current_pixels = pixels
+                    current_d_image = d_image
+                else:
+                    # Decode: only process new token, no vision
+                    current_ids = next_token
+                    current_pixels = None
+                    current_d_image = None
+                
+                logits, past_key_values = self.forward(
+                    input_ids=current_ids,
+                    pixels=current_pixels,
+                    d_image=current_d_image,
+                    past_key_values=past_key_values,
                 )
+                
                 last_logits = logits[:, -1, :]
                 probs = F.softmax(last_logits, dim=-1)
                 next_token = probs.argmax(dim=-1, keepdim=True)
