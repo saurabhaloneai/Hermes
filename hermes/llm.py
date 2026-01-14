@@ -195,23 +195,25 @@ class LLM:
     def get_last_stats(self) -> Optional[GenerationStats]:
         return getattr(self, "last_generation_stats", None)
 
-
 if __name__ == "__main__":
     llm = LLM.from_pretrained("Qwen/Qwen3-VL-2B-Instruct")
 
-    print("--- Streaming Generation ---")
+    # Test with image - UPDATE THIS PATH to your actual image
+    print("--- Streaming Generation (with image) ---")
     for chunk in llm.generate_stream(
         text="What is in this image?",
-        image="path/to/image.jpg",
+        image="/path/to/your/real/image.jpg",  # <-- UPDATE THIS PATH
     ):
         print(chunk, end="", flush=True)
     print()
 
     stats = llm.get_last_stats()
     if stats:
-        print(f"\n--- Performance Stats ---")
+        print(f"\n--- Performance Stats (image) ---")
         print(f"TTFT: {stats.ttft * 1000:.2f} ms")
         print(f"Total time: {stats.total_time:.2f} s")
         print(f"Tokens generated: {stats.num_tokens}")
         print(f"Tokens/second: {stats.tokens_per_second:.2f}")
+
+
 

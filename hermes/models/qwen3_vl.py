@@ -73,10 +73,16 @@ class Qwen3VL(nn.Module):
         pixels: Optional[torch.Tensor] = None,
         d_image: Optional[torch.Tensor] = None,
         past_key_values: Optional[list] = None,
-    ) -> Tuple[torch.Tensor, list]:
+        position_offset: int = 0,
+    ) -> Tuple[torch.Tensor, list, int]:
         
         input_embeds = self.model.language_model.embed_tokens(input_ids)
-        position_ids = self._get_position_ids(input_ids=input_ids, d_image=d_image, past_key_values=past_key_values)
+        position_ids, next_position = self._get_position_ids(
+            input_ids=input_ids, 
+            d_image=d_image, 
+            past_key_values=past_key_values,
+            position_offset=position_offset,
+        )
 
         if pixels is not None:
             pixels = pixels.to(input_embeds.dtype)
@@ -105,31 +111,33 @@ class Qwen3VL(nn.Module):
             if self.lm_head is None
             else self.lm_head(output)
         )
-        return logits, present_key_values
+        return logits, present_key_values, next_position
 
     def _get_position_ids(
         self, 
         input_ids: torch.Tensor, 
         d_image: Optional[torch.Tensor] = None,
         past_key_values: Optional[list] = None,
-    ) -> torch.Tensor:
-        
+        position_offset: int = 0,
+    ) -> Tuple[torch.Tensor, int]:
+        """
+        Returns:
+            position_ids: (3, B, T) tensor of position IDs
+            next_position: the next text position to use for subsequent tokens
+        """
         B, T = input_ids.shape
         image_pad_token = getattr(self.config, "image_token_id", 151655)
-        
-        # calculate offset from cached sequence
-        past_len = 0
-        if past_key_values is not None and len(past_key_values) > 0:
-            # get sequence length from first layer's cached keys
-            past_len = past_key_values[0][0].shape[2]
 
         if d_image is None or past_key_values is not None:
-            position_ids = torch.arange(past_len, past_len + T, dtype=torch.long, device=input_ids.device)
+            # Text-only or decode phase: use sequential positions starting from offset
+            start_pos = position_offset
+            position_ids = torch.arange(start_pos, start_pos + T, dtype=torch.long, device=input_ids.device)
             position_ids = position_ids.unsqueeze(0).expand(3, B, -1)
-            return position_ids
+            return position_ids, start_pos + T
 
         # Prefill with images: compute M-RoPE positions
         position_ids = torch.zeros(3, B, T, dtype=torch.long, device=input_ids.device)
+        final_text_idx = 0
         for batch_idx in range(B):
             seq = input_ids[batch_idx]
             text_idx, image_idx, seq_idx = 0, 0, 0
@@ -147,8 +155,9 @@ class Qwen3VL(nn.Module):
                 else:
                     position_ids[:, batch_idx, seq_idx] = text_idx
                     text_idx, image_idx, seq_idx = text_idx + 1, image_idx, seq_idx + 1
+            final_text_idx = max(final_text_idx, text_idx)
 
-        return position_ids
+        return position_ids, final_text_idx
 
     def _emit_image_block(
         self,
@@ -194,6 +203,7 @@ class Qwen3VL(nn.Module):
         self.eval()
         generated_ids = input_ids
         past_key_values = None
+        position_offset = 0
 
         with torch.no_grad():
             for step in range(max_new_tokens):
@@ -208,11 +218,12 @@ class Qwen3VL(nn.Module):
                     current_pixels = None
                     current_d_image = None
                 
-                logits, past_key_values = self.forward(
+                logits, past_key_values, position_offset = self.forward(
                     input_ids=current_ids,
                     pixels=current_pixels,
                     d_image=current_d_image,
                     past_key_values=past_key_values,
+                    position_offset=position_offset,
                 )
                 
                 last_logits = logits[:, -1, :]
