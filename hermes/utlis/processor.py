@@ -9,8 +9,6 @@ from typing import List, Tuple, Optional
 from tokenizers import Tokenizer
 from huggingface_hub import hf_hub_download
 
-# fmt: off
-# Constants for message rendering
 USER_MESSAGE_TEMPLATE = "<|im_start|>user\n{content}<|im_end|>\n"
 ASSISTANT_MESSAGE_TEMPLATE = "<|im_start|>assistant\n{content}{tool_calls}<|im_end|>\n"
 TOOL_MESSAGE_TEMPLATE = "<|im_start|>user\n<tool_response>\n{content}\n</tool_response><|im_end|>\n"
@@ -20,13 +18,11 @@ IMAGE_TEMPLATE = "<|vision_start|>{content}<|vision_end|>"
 TOOL_CALL_TEMPLATE = '<tool_call>\n{{"name": "{name}", "arguments": {arguments}}}\n</tool_call>'
 TOOL_RESPONSE_TEMPLATE = "<|im_start|>user\n<tool_response>\n{content}\n</tool_response><|im_end|>\n"
 
-# Constants for image processing
 IMAGE_MEAN = np.array([[[0.5, 0.5, 0.5]]], dtype=np.float32)
 IMAGE_STD = np.array([[[0.5, 0.5, 0.5]]], dtype=np.float32)
 SPATIAL_PATCH_SIZE = 16
 SPATIAL_MERGE_SIZE = 2
 TEMPORAL_PATCH_SIZE = 2
-# fmt: on
 
 
 class Processor:
@@ -44,24 +40,20 @@ class Processor:
     def from_pretrained(cls, repo_id: str):
         tokenizer = Tokenizer.from_pretrained(repo_id)
 
-        # Load preprocessor config to get size parameters
         try:
             config_path = hf_hub_download(repo_id, "preprocessor_config.json")
             with open(config_path, "r") as f:
                 config = json.load(f)
 
-            # Extract size parameters
             size = config.get("size", {})
             min_pixels = size.get("shortest_edge", 65536)
             max_pixels = size.get("longest_edge", 16777216)
         except Exception:
-            # Fallback to defaults if config not found
             min_pixels = 65536
             max_pixels = 16777216
 
         return cls(tokenizer, min_pixels=min_pixels, max_pixels=max_pixels)
 
-    # Turn openai harmony style messages into model input tensors.
     def __call__(
         self,
         messages: List[dict],
@@ -100,7 +92,6 @@ class Processor:
             else:
                 raise ValueError(f"Unsupported role: {role}")
 
-        # Add generation prompt if requested
         if add_generation_prompt:
             messages_str += "<|im_start|>assistant\n"
 
@@ -165,7 +156,6 @@ class Processor:
         )
 
     def _fetch_img_through_url(self, url: str) -> Image.Image:
-        # Accepts both local file path and remote URL
         if url.startswith(("http://", "https://")):
             response = requests.get(url)
             response.raise_for_status()
@@ -182,19 +172,15 @@ class Processor:
         )
         image_np_resized = np.array(image_resized, dtype=np.float32)
 
-        # Normalize
         image_np_resized = image_np_resized / 255.0
         image_np_resized = (image_np_resized - IMAGE_MEAN) / IMAGE_STD
 
-        # Convert to channels-first and add batch dimension
         image_np_resized = np.transpose(image_np_resized, (2, 0, 1))
         image_np_resized = image_np_resized[np.newaxis, ...]
 
-        # Handle temporal dimension
         if image_np_resized.shape[0] == 1:
             image_np_resized = np.tile(image_np_resized, (TEMPORAL_PATCH_SIZE, 1, 1, 1))
 
-        # Extract patches
         batch_size, channels, height, width = image_np_resized.shape
         grid_t = batch_size // TEMPORAL_PATCH_SIZE
         grid_h = resized_height // SPATIAL_PATCH_SIZE
@@ -243,7 +229,6 @@ class Processor:
             h_bar = max(factor, int(np.floor(height / beta / factor) * factor))
             w_bar = max(factor, int(np.floor(width / beta / factor) * factor))
         elif h_bar * w_bar < self.min_pixels:
-            # Check 2D area only (without temporal dimension) for min_pixels
             beta = np.sqrt(self.min_pixels / (height * width))
             h_bar = int(np.ceil(height * beta / factor) * factor)
             w_bar = int(np.ceil(width * beta / factor) * factor)
